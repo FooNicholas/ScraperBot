@@ -1,16 +1,16 @@
-import aiohttp
-import asyncio
+import os
 import requests
 from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, ConversationHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, ConversationHandler, filters, CallbackContext
 from dotenv import load_dotenv
-import os
+from telegram import Bot
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+bot = Bot(token=BOT_TOKEN)
 
 translator = GoogleTranslator(source="ja", target="en")
 rarity, set_number = range(2)
@@ -45,16 +45,16 @@ def get_cards_by_rarity(rarity, set_number):
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome! Please enter the set number (e.g. dzbt01):")
+async def start(update: Update, context: CallbackContext):
+    await update.message.reply_text("Welcome! Please enter the set number (e.g., dzbt01):")
     return set_number
 
-async def handle_set_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_set_number(update: Update, context: CallbackContext):
     context.user_data['set_number'] = update.message.text.strip().upper()
-    await update.message.reply_text("Please enter the rarity (e.g. FFR):")
+    await update.message.reply_text("Please enter the rarity (e.g., FFR):")
     return rarity
 
-async def handle_rarity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_rarity(update: Update, context: CallbackContext):
     context.user_data['rarity'] = update.message.text.strip().upper()
     set_number = context.user_data['set_number']
     rarity = context.user_data['rarity']
@@ -63,22 +63,27 @@ async def handle_rarity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(result)
     return ConversationHandler.END
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cancel(update: Update, context: CallbackContext):
     await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
     return ConversationHandler.END
 
-if __name__ == "__main__":
+def handler(event, context):
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             set_number: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
-            rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]    
+            rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     application.add_handler(conv_handler)
+    
+    application.process_update(Update.de_json(event, bot))
 
-    application.run_polling()
+    return {
+        'statusCode': 200,
+        'body': 'Handled'
+    }
