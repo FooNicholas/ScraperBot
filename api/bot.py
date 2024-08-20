@@ -67,23 +67,18 @@ async def cancel(update: Update, context: CallbackContext):
     await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
     return ConversationHandler.END
 
-def handler(event, context):
+if __name__ == "__main__":
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             set_number: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
-            rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]
+            rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]    
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     application.add_handler(conv_handler)
-    
-    application.process_update(Update.de_json(event, bot))
 
-    return {
-        'statusCode': 200,
-        'body': 'Handled'
-    }
+    application.run_polling()
