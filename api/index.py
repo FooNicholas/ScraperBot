@@ -41,14 +41,15 @@ class TelegramWebhook(BaseModel):
 
 @app.post("/webhook")
 async def telegram_webhook(webhook_data: TelegramWebhook):
-    '''
-    Handle incoming webhook updates from Telegram
-    '''
     try:
+        # Log the incoming request data
+        print(webhook_data.dict())
+        
         update = Update.de_json(webhook_data.dict(), bot)
         await application.process_update(update)
         return {"message": "ok"}
     except Exception as e:
+        print(f"Error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
