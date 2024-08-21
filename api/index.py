@@ -25,23 +25,36 @@ translator = GoogleTranslator(source="ja", target="en")
 rarity, set_number = range(2)
 
 class TelegramWebhook(BaseModel):
+    '''
+    Telegram Webhook Model using Pydantic for request body validation
+    '''
     update_id: int
-    message: dict
+    message: Optional[dict]
+    edited_message: Optional[dict]
+    channel_post: Optional[dict]
+    edited_channel_post: Optional[dict]
+    inline_query: Optional[dict]
+    chosen_inline_result: Optional[dict]
+    callback_query: Optional[dict]
+    shipping_query: Optional[dict]
+    pre_checkout_query: Optional[dict]
+    poll: Optional[dict]
+    poll_answer: Optional[dict]
+
 
 @app.post("/webhook")
-async def telegram_webhook(request: Request):
-    """
-    Handle incoming webhook updates from Telegram.
-    """
-    try:
-        json_data = await request.json()
-        update = Update.de_json(json_data, bot)
-        
-        # Process update with dispatcher
-        application.process_update(update)
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+def webhook(webhook_data: TelegramWebhook):
+    '''
+    Telegram Webhook
+    '''
+    bot = Bot(token=TOKEN)
+    update = Update.de_json(webhook_data.__dict__, bot)
+    dispatcher = Dispatcher(bot, None, workers=4)
+    register_handlers(dispatcher)
+
+    dispatcher.process_update(update)
+
+    return {"message": "ok"}
 
 @app.get("/")
 def index():
