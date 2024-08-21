@@ -1,19 +1,9 @@
 {
-  "version": 2,
   "builds": [
-    {
-      "src": "index.py",
-      "use": "@vercel/python"
-    }
+    { "src": "index.py", "use": "@vercel/python" }
   ],
   "routes": [
-    {
-      "src": "/webhook",
-      "dest": "index.py"
-    },
-    {
-      "src": "/",
-      "dest": "index.py"
-    }
+    { "src": "/webhook", "dest": "/api/index" },
+    { "src": "/", "dest": "/api/index" }
   ]
 }

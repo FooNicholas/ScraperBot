@@ -118,10 +118,6 @@ def main():
 
     application.add_handler(conv_handler)
 
-    application.run_polling()
-    application.idle()
-
-
 if __name__ == "__main__":
     main()
     
