@@ -16,6 +16,9 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 
+"""
+API endpoint for Telegram webhook.
+"""
 app = FastAPI()
 
 translator = GoogleTranslator(source="ja", target="en")
@@ -44,6 +47,10 @@ async def telegram_webhook(request: Request):
 def index():
     return {"message": "Hello, World!"}
 
+
+"""
+Telegram bot application.
+"""
 def fetch(url):
     response = requests.get(url)
     return response.text
@@ -96,7 +103,8 @@ async def cancel(update: Update, context: CallbackContext):
     await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
     return ConversationHandler.END
 
-if __name__ == "__main__":
+def main():
+
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
@@ -111,3 +119,9 @@ if __name__ == "__main__":
     application.add_handler(conv_handler)
 
     application.run_polling()
+    application.idle()
+
+
+if __name__ == "__main__":
+    main()
+    
