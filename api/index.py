@@ -16,9 +16,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 
-"""
-API endpoint for Telegram webhook.
-"""
 app = FastAPI()
 
 translator = GoogleTranslator(source="ja", target="en")
@@ -26,7 +23,7 @@ rarity, set_number = range(2)
 
 class TelegramWebhook(BaseModel):
     '''
-    Telegram Webhook Model using Pydantic for request body validation
+    Telegram Webhook Model for request body validation
     '''
     update_id: int
     message: Optional[dict]
@@ -43,27 +40,23 @@ class TelegramWebhook(BaseModel):
 
 
 @app.post("/webhook")
-def webhook(webhook_data: TelegramWebhook):
+async def telegram_webhook(webhook_data: TelegramWebhook):
     '''
-    Telegram Webhook
+    Handle incoming webhook updates from Telegram
     '''
-    bot = Bot(token=TOKEN)
-    update = Update.de_json(webhook_data.__dict__, bot)
-    dispatcher = Dispatcher(bot, None, workers=4)
-    register_handlers(dispatcher)
+    try:
+        update = Update.de_json(webhook_data.dict(), bot)
+        await application.process_update(update)
+        return {"message": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    dispatcher.process_update(update)
-
-    return {"message": "ok"}
 
 @app.get("/")
 def index():
     return {"message": "Hello, World!"}
 
 
-"""
-Telegram bot application.
-"""
 def fetch(url):
     response = requests.get(url)
     return response.text
@@ -116,21 +109,16 @@ async def cancel(update: Update, context: CallbackContext):
     await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
     return ConversationHandler.END
 
-def main():
+application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            set_number: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
-            rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]    
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start)],
+    states={
+        set_number: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
+        rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+)
 
-    application.add_handler(conv_handler)
+application.add_handler(conv_handler)
 
-if __name__ == "__main__":
-    main()
-    
