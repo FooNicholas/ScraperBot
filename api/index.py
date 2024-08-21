@@ -1,19 +1,48 @@
 import os
 import requests
+from typing import Optional
+from fastapi import FastAPI, Request, HTTPException
+from pydantic import BaseModel
+
 from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
-from telegram import Update
+
+from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, ConversationHandler, filters, CallbackContext
+
 from dotenv import load_dotenv
-from telegram import Bot
 
 load_dotenv()
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 
+app = FastAPI()
+
 translator = GoogleTranslator(source="ja", target="en")
 rarity, set_number = range(2)
+
+class TelegramWebhook(BaseModel):
+    update_id: int
+    message: dict
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    """
+    Handle incoming webhook updates from Telegram.
+    """
+    try:
+        json_data = await request.json()
+        update = Update.de_json(json_data, bot)
+        
+        # Process update with dispatcher
+        application.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/")
+def index():
+    return {"message": "Hello, World!"}
 
 def fetch(url):
     response = requests.get(url)
@@ -46,7 +75,7 @@ def get_cards_by_rarity(rarity, set_number):
     return result if result else "No cards found."
 
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Welcome! Please enter the set number (e.g., dzbt01):")
+    await update.message.reply_text("Please enter the set number (e.g., dzbt01):")
     return set_number
 
 async def handle_set_number(update: Update, context: CallbackContext):
