@@ -2,6 +2,7 @@ import os
 import logging
 
 import uvicorn
+from threading import Thread
 from fastapi import FastAPI
 
 from telegram import Update, Bot
@@ -90,8 +91,13 @@ def get_cards_by_rarity(rarity, set_number):
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
 
-def main():
+def start_bot():
     application.run_polling()
+
+def start_fastapi():
+    port = int(os.getenv("PORT", 8080))
+    print(f"Server started on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 app = FastAPI()
 
@@ -100,7 +106,11 @@ def read_root():
     return {"message": "Bot is running"}
 
 if __name__ == "__main__":
-    port = 8080
-    print(f"Server started on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
-    main()
+    bot_thread = Thread(target=start_bot)
+    bot_thread.start()
+
+    fastapi_thread = Thread(target=start_fastapi)
+    fastapi_thread.start()
+
+    bot_thread.join()
+    fastapi_thread.join()
