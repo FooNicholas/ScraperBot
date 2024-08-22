@@ -1,8 +1,4 @@
 import os
-from typing import Optional
-
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 
 import logging
 from telegram import Update, Bot
@@ -17,8 +13,6 @@ from dotenv import load_dotenv
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-app = FastAPI()
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -27,21 +21,6 @@ application = ApplicationBuilder().token(BOT_TOKEN).build()
 translator = GoogleTranslator(source="ja", target="en")
 
 rarity, set_number = range(2)
-
-#Pydantic model for Telegram webhook data
-class TelegramWebhook(BaseModel):
-    update_id: int
-    message: Optional[dict]
-    edited_message: Optional[dict]
-    channel_post: Optional[dict]
-    edited_channel_post: Optional[dict]
-    inline_query: Optional[dict]
-    chosen_inline_result: Optional[dict]
-    callback_query: Optional[dict]
-    shipping_query: Optional[dict]
-    pre_checkout_query: Optional[dict]
-    poll: Optional[dict]
-    poll_answer: Optional[dict]
 
 # Telegram command handlers
 async def start(update: Update, context: CallbackContext):
@@ -77,22 +56,6 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-@app.post("/webhook")
-async def telegram_webhook(webhook_data: TelegramWebhook):
-    try:
-        logger.info(f"Received webhook data: {webhook_data.dict()}")
-        update = Update.de_json(webhook_data.dict(), application.bot)
-        logger.info(f"Deserialized update object: {update}")
-        await application.update_queue.put(update)
-        return {"message": "ok"}
-    
-    except Exception as e:
-        logger.error(f"Error processing update: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"Error processing webhook: {str(e)}")
-        
-@app.get("/")
-def index():
-    return {"message": "Hello, World!"}
 
 def fetch(url):
     response = requests.get(url)
@@ -123,3 +86,9 @@ def get_cards_by_rarity(rarity, set_number):
     translated_names = [translate_card_name(name) for name in card_names]
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
+
+def main():
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
