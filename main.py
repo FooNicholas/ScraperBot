@@ -1,17 +1,13 @@
 import os
 import logging
-
-import uvicorn
+import asyncio
 from fastapi import FastAPI
-
-from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, CallbackContext
-
-from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
+from bs4 import BeautifulSoup
 import requests
-
 from dotenv import load_dotenv
+import uvicorn
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -59,7 +55,6 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-
 def fetch(url):
     response = requests.get(url)
     return response.text
@@ -90,18 +85,21 @@ def get_cards_by_rarity(rarity, set_number):
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
 
-def main():
-    application.run_polling()
+async def start_bot():
+    await application.start()
+    await application.updater.start_polling()
+    await application.updater.idle()
 
 app = FastAPI()
+
+@app.on_event("startup")
+async def on_startup():
+    asyncio.create_task(start_bot())
 
 @app.get("/")
 def read_root():
     return {"message": "Bot is running"}
 
 if __name__ == "__main__":
-    main()
-    port = 8080
-    print(f"Server started on port {port}")
+    port = int(os.getenv("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
-    
