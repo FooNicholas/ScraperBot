@@ -75,14 +75,14 @@ application.add_handler(conv_handler)
 
 @app.post("/webhook")
 async def telegram_webhook(webhook_data: TelegramWebhook):
-    '''
-    Handle incoming webhook updates from Telegram
-    '''
     try:
+        print("Received data:", webhook_data.dict())
+
         update = Update.de_json(webhook_data.dict(), application.bot)
         await application.update_queue.put(update)
         return {"message": "ok"}
     except Exception as e:
+        print(f"Error processing update: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/")
