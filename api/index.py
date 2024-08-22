@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+import logging
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, CallbackContext
 
@@ -14,9 +15,12 @@ import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 app = FastAPI()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 application = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -76,15 +80,16 @@ application.add_handler(conv_handler)
 @app.post("/webhook")
 async def telegram_webhook(webhook_data: TelegramWebhook):
     try:
-        print("Received data:", webhook_data.dict())
-
+        logger.info(f"Received webhook data: {webhook_data.dict()}")
         update = Update.de_json(webhook_data.dict(), application.bot)
+        logger.info(f"Deserialized update object: {update}")
         await application.update_queue.put(update)
         return {"message": "ok"}
+    
     except Exception as e:
-        print(f"Error processing update: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
+        logger.error(f"Error processing update: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Error processing webhook: {str(e)}")
+        
 @app.get("/")
 def index():
     return {"message": "Hello, World!"}
