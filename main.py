@@ -1,6 +1,10 @@
 import os
-
 import logging
+
+import uvicorn
+from threading import Thread
+from fastapi import FastAPI
+
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, CallbackContext
 
@@ -87,8 +91,21 @@ def get_cards_by_rarity(rarity, set_number):
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
 
-def main():
+def run_bot():
     application.run_polling()
+
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "Bot is running"}
+
+def main():
+    bot_thread = Thread(target=run_bot)
+    bot_thread.start()
+
+    uvicorn.run(app, host="0.0.0.0", port=8080)
 
 if __name__ == "__main__":
     main()
