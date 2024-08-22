@@ -1,30 +1,31 @@
 import os
-import requests
 from typing import Optional
-from fastapi import FastAPI, Request, HTTPException
+
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, CallbackContext
 
 from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
-
-from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, ConversationHandler, filters, CallbackContext
+import requests
 
 from dotenv import load_dotenv
 
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(token=BOT_TOKEN)
 
 app = FastAPI()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+application = ApplicationBuilder().token(BOT_TOKEN).build()
 
 translator = GoogleTranslator(source="ja", target="en")
+
 rarity, set_number = range(2)
 
+#Pydantic model for Telegram webhook data
 class TelegramWebhook(BaseModel):
-    '''
-    Telegram Webhook Model for request body validation
-    '''
     update_id: int
     message: Optional[dict]
     edited_message: Optional[dict]
@@ -38,25 +39,55 @@ class TelegramWebhook(BaseModel):
     poll: Optional[dict]
     poll_answer: Optional[dict]
 
+# Telegram command handlers
+async def start(update: Update, context: CallbackContext):
+    await update.message.reply_text("Please enter the set number (e.g., dzbt01):")
+    return set_number
+
+async def handle_set_number(update: Update, context: CallbackContext):
+    context.user_data['set_number'] = update.message.text.strip().upper()
+    await update.message.reply_text("Please enter the rarity (e.g., FFR):")
+    return rarity
+
+async def handle_rarity(update: Update, context: CallbackContext):
+    context.user_data['rarity'] = update.message.text.strip().upper()
+    set_number = context.user_data['set_number']
+    rarity = context.user_data['rarity']
+    await update.message.reply_text(f"Searching for cards with rarity: {rarity} in set_number: {set_number}")
+    result = get_cards_by_rarity(rarity, set_number)
+    await update.message.reply_text(result)
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: CallbackContext):
+    await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
+    return ConversationHandler.END
+
+# Register command handlers
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start)],
+    states={
+        set_number: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
+        rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+)
+application.add_handler(conv_handler)
 
 @app.post("/webhook")
 async def telegram_webhook(webhook_data: TelegramWebhook):
+    '''
+    Handle incoming webhook updates from Telegram
+    '''
     try:
-        # Log the incoming request data
-        print(webhook_data.dict())
-        
-        update = Update.de_json(webhook_data.dict(), bot)
-        await application.process_update(update)
+        update = Update.de_json(webhook_data.dict(), application.bot)
+        await application.update_queue.put(update)
         return {"message": "ok"}
     except Exception as e:
-        print(f"Error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @app.get("/")
 def index():
     return {"message": "Hello, World!"}
-
 
 def fetch(url):
     response = requests.get(url)
@@ -87,39 +118,3 @@ def get_cards_by_rarity(rarity, set_number):
     translated_names = [translate_card_name(name) for name in card_names]
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
-
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Please enter the set number (e.g., dzbt01):")
-    return set_number
-
-async def handle_set_number(update: Update, context: CallbackContext):
-    context.user_data['set_number'] = update.message.text.strip().upper()
-    await update.message.reply_text("Please enter the rarity (e.g., FFR):")
-    return rarity
-
-async def handle_rarity(update: Update, context: CallbackContext):
-    context.user_data['rarity'] = update.message.text.strip().upper()
-    set_number = context.user_data['set_number']
-    rarity = context.user_data['rarity']
-    await update.message.reply_text(f"Searching for cards with rarity: {rarity} in set_number: {set_number}")
-    result = get_cards_by_rarity(rarity, set_number)
-    await update.message.reply_text(result)
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: CallbackContext):
-    await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
-    return ConversationHandler.END
-
-application = ApplicationBuilder().token(BOT_TOKEN).build()
-
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        set_number: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
-        rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
-
-application.add_handler(conv_handler)
-
