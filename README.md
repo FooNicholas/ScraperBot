@@ -1,1 +1,1 @@
-# CardboardScraper
+# Paper Scraper
