@@ -1,7 +1,8 @@
 import os
 import logging
 import asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, CallbackContext
 from deep_translator import GoogleTranslator
 from bs4 import BeautifulSoup
@@ -11,6 +12,7 @@ import uvicorn
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ translator = GoogleTranslator(source="ja", target="en")
 
 rarity, set_number = range(2)
 
-# Telegram command handlers
+#telegram command handlers
 async def start(update: Update, context: CallbackContext):
     await update.message.reply_text("Please enter the set number (e.g., dzbt01):")
     return set_number
@@ -44,7 +46,7 @@ async def cancel(update: Update, context: CallbackContext):
     await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
     return ConversationHandler.END
 
-# Register command handlers
+#register command handlers
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start)],
     states={
@@ -55,6 +57,7 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
+#web scraping functions
 def fetch(url):
     response = requests.get(url)
     return response.text
@@ -85,16 +88,18 @@ def get_cards_by_rarity(rarity, set_number):
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
 
-async def start_bot():
-    await application.start()
-    await application.updater.start_polling()
-    await application.updater.idle()
-
 app = FastAPI()
 
 @app.on_event("startup")
 async def on_startup():
-    asyncio.create_task(start_bot())
+    await application.initialize()
+    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+
+@app.post("/webhook")
+async def handle_webhook(request: Request):
+    update = Update.de_json(await request.json(), application.bot)
+    await application.process_update(update)
+    return {"status": "ok"}
 
 @app.get("/")
 def read_root():
