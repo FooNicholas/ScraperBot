@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, CallbackContext
@@ -9,6 +8,8 @@ from bs4 import BeautifulSoup
 import requests
 from dotenv import load_dotenv
 import uvicorn
+from contextlib import asynccontextmanager
+
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -88,12 +89,13 @@ def get_cards_by_rarity(rarity, set_number):
     result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
     return result if result else "No cards found."
 
-app = FastAPI()
-
-@app.on_event("startup")
-async def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await application.initialize()
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
@@ -104,6 +106,10 @@ async def handle_webhook(request: Request):
 @app.get("/")
 def read_root():
     return {"message": "Bot is running"}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
