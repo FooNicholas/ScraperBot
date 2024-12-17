@@ -1,115 +1,169 @@
 import os
-import logging
-from fastapi import FastAPI, Request
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ConversationHandler, filters, CallbackContext
-from deep_translator import GoogleTranslator
-from bs4 import BeautifulSoup
-import requests
-from dotenv import load_dotenv
-import uvicorn
+import asyncio
 from contextlib import asynccontextmanager
 
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+import uvicorn
+
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder, 
+    CommandHandler, 
+    MessageHandler, 
+    ConversationHandler, 
+    filters, 
+    CallbackContext
+)
+
+from scrapers.yuyutei.yuyutei_scraper import YuyuTeiScraper
+from scrapers.bigweb.bigweb_scraper import BigWebScraper
+from services.translation_service import TranslationService
+from utils.error_handling import (
+    log_error, 
+    ScraperError, 
+    NetworkError, 
+    ParseError
+)
+
+from dotenv import load_dotenv
 
 load_dotenv()
+
+#configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+translation_service = TranslationService()
 
-application = ApplicationBuilder().token(BOT_TOKEN).build()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+BIGWEB_MAPPING_FILE = os.path.join(BASE_DIR, "scrapers", "bigweb", "bigweb_mapping.json")
 
-translator = GoogleTranslator(source="ja", target="en")
+scrapers = {
+    'yuyutei': YuyuTeiScraper(translator=translation_service),
+    'bigweb': BigWebScraper(mapping_file=BIGWEB_MAPPING_FILE,translator=translation_service)
+}
 
-rarity, set_number = range(2)
+#states for conversation handler
+SITE, SET_NUMBER, RARITY = range(3)
 
-#telegram command handlers
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Please enter the set number (e.g., dzbt01):")
-    return set_number
-
-async def handle_set_number(update: Update, context: CallbackContext):
-    context.user_data['set_number'] = update.message.text.strip().upper()
-    await update.message.reply_text("Please enter the rarity (e.g., FFR):")
-    return rarity
-
-async def handle_rarity(update: Update, context: CallbackContext):
-    context.user_data['rarity'] = update.message.text.strip().upper()
-    set_number = context.user_data['set_number']
-    rarity = context.user_data['rarity']
-    await update.message.reply_text(f"Searching for cards with rarity: {rarity} in set_number: {set_number}")
-    result = get_cards_by_rarity(rarity, set_number)
-    await update.message.reply_text(result)
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: CallbackContext):
-    await update.message.reply_text("Operation cancelled. You can start again by typing /start.")
-    return ConversationHandler.END
-
-#register command handlers
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        set_number: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
-        rarity: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
-application.add_handler(conv_handler)
-
-#web scraping functions
-def fetch(url):
-    response = requests.get(url)
-    return response.text
-
-def translate_card_name(card_name):
-    return translator.translate(card_name)
-
-def get_cards_by_rarity(rarity, set_number):
-    URL = f"https://yuyu-tei.jp/sell/vg/s/{set_number}"
-    page_content = fetch(URL)
-    soup = BeautifulSoup(page_content, "html.parser")
-    results = soup.find(class_="col-12 mb-5 pb-5")
-    rarity_containers = results.find_all(class_="py-4 cards-list")
-    card_list = []
-    for container in rarity_containers:
-        found_rarity = container.find("span", class_="py-2 d-inline-block px-2 me-2 text-white fw-bold")
-        if found_rarity.text == rarity:
-            card_list = container.find_all("div", class_="col-md")
-            break
-    card_names = []
-    card_prices = []
-    for card in card_list:
-        card_name = card.find("h4", class_="text-primary fw-bold").text.strip()
-        card_price = card.find("strong", class_="d-block text-end").text.strip()
-        card_names.append(card_name)
-        card_prices.append(card_price)
-    translated_names = [translate_card_name(name) for name in card_names]
-    result = "\n".join(f"{translated_name}: {card_price}" for translated_name, card_price in zip(translated_names, card_prices))
-    return result if result else "No cards found."
-
+#on startup / shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await application.initialize()
-    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-    yield
+
+    try:
+        bot_application = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        #setup conversation handler
+        conv_handler = ConversationHandler(
+            entry_points=[CommandHandler("start", start)],
+            states={
+                SITE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_site)],
+                SET_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_number)],
+                RARITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rarity)]
+            },
+            fallbacks=[CommandHandler("cancel", cancel)]
+        )
+        
+        bot_application.add_handler(conv_handler)
+        
+        await bot_application.initialize()
+        await bot_application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+        
+        app.state.bot_application = bot_application
+        
+        yield
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
+        raise
 
 app = FastAPI(lifespan=lifespan)
 
+#telegrambot handlers
+async def start(update: Update, context: CallbackContext):
+    
+    await update.message.reply_text(
+        "Welcome! One reply at a time please. Please choose a site:\n"
+        "Available sites: yuyutei, bigweb"
+    )
+    return SITE
+
+async def handle_site(update: Update, context: CallbackContext):
+    
+    site = update.message.text.lower().strip()
+    
+    if site not in scrapers:
+        await update.message.reply_text(
+            "Invalid site. Please choose from: " + 
+            ", ".join(scrapers.keys())
+        )
+        return SITE
+    
+    context.user_data['site'] = site
+    await update.message.reply_text("Enter the set number (e.g. dzbt01):")
+    return SET_NUMBER
+
+async def handle_set_number(update: Update, context: CallbackContext):
+
+    set_number = update.message.text.strip().upper()
+    context.user_data['set_number'] = set_number
+    await update.message.reply_text("Enter the rarity (e.g. FFR):")
+    return RARITY
+
+async def handle_rarity(update: Update, context: CallbackContext):
+
+    site = context.user_data['site']
+    set_number = context.user_data['set_number']
+    rarity = update.message.text.strip().upper()
+    
+    try:
+        loading_message = await update.message.reply_text("Loading...")
+        scraper = scrapers[site]
+        url = scraper.construct_url(set_number, rarity)
+        page_content = await scraper.fetch_page(url)
+        cards = await scraper.parse_cards(page_content, rarity)
+        
+        if not cards:
+            await loading_message.edit_text("No cards found.")
+        else:
+            result = "\n".join(
+                f"{card['name']}: {card['price']}" for card in cards
+            )
+            await loading_message.edit_text(result)
+    
+    except Exception as e:
+        log_error(e)
+        await update.message.reply_text(
+            "An error occurred while processing your request."
+        )
+    
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: CallbackContext):
+
+    await update.message.reply_text(
+        "Operation cancelled. You can start again by typing /start."
+    )
+    return ConversationHandler.END
+
+#Endpoints
 @app.post("/webhook")
 async def handle_webhook(request: Request):
-    update = Update.de_json(await request.json(), application.bot)
-    await application.process_update(update)
-    return {"status": "ok"}
+
+    try:
+        update = Update.de_json(await request.json(), app.state.bot_application.bot)
+        await app.state.bot_application.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        log_error(e)
+        return JSONResponse(
+            status_code=500, 
+            content={"error": "Webhook processing failed"}
+        )
 
 @app.get("/")
 def read_root():
-    return {"message": "Bot is running"}
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+    return {"message": "Telegram Scraper Bot is running"}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
